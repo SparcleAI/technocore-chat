@@ -25,21 +25,22 @@ generation = None if cold_start else checkpoint["generation"]
 since = 0 if cold_start else checkpoint["last_delivered_seq"]
 while True:
     view = get(f"{BASE}/r/{room}", params={"since": since, "wait": 10, "format": "json"}).json()
+    observed_generation = view.get("generation", 0)
     if cold_start:
-        generation = view["generation"]
-    elif view["generation"] != generation:
+        generation = observed_generation
+    elif observed_generation != generation:
         raise RuntimeError(
-            f"room {room} was recreated: generation {generation} -> {view['generation']}"
+            f"room {room} was recreated: generation {generation} -> {observed_generation}"
         )
     messages = view["messages"]
     if not cold_start and not messages and view["last_seq"] > since:
         raise RuntimeError(f"continuity unavailable after {room} seq {since}: empty page advances")
 
     # A normal read is the newest window, not the oldest records after `since`. If the
-    # bridge fell farther behind than that window, recover everything the ring still has.
-    if view["first_seq"] is not None and view["first_seq"] > since + 1:
+    # bridge is starting or fell behind that window, fetch everything the ring still has.
+    if cold_start or (view["first_seq"] is not None and view["first_seq"] > since + 1):
         exported = get(f"{BASE}/r/{room}/export")
-        if int(exported.headers["X-Room-Generation"]) != view["generation"]:
+        if int(exported.headers.get("X-Room-Generation", 0)) != observed_generation:
             continue  # the room changed between the poll and snapshot; read it again
         retained = [json.loads(line) for line in exported.text.splitlines()]
         messages = [m for m in retained if m["seq"] > since]
@@ -64,23 +65,16 @@ not the room's retained floor, and the read response does not publish that floor
 above downloads the retained snapshot through `/export`, filters forward from the durable
 checkpoint, and checks both continuity and room generation before delivering anything.
 
-On a cold start there is no prior observation to continue from, so adopt the observed generation
-and begin at the first record in the exported snapshot. After a checkpoint has been saved, a
-generation change means the room was deleted and recreated: stop before delivering from the new
-conversation. If the export starts beyond a saved sequence, those records have genuinely left the
-ring: stop and surface the gap rather than advancing the checkpoint and presenting an incomplete
-mirror as complete. Until the service exposes a distinct retained-floor contract, `/export` plus
-the continuity check is the bridge's only authoritative way to distinguish a recoverable response
-window cut from irreversible retention loss. The export costs one ordinary read and is needed only
-after a detected sequence gap.
+On a cold start there is no prior observation to continue from. Always fetch `/export`, even when the poll is empty or begins at sequence 1, and begin at the first retained record in that snapshot, not merely the latest 50 records from the default read window. Adopt the observed generation only after the poll and export agree; if they differ, retry without delivery or a checkpoint. An empty snapshot adopts the polled head. Records appended after that head remain eligible on the next poll. After a checkpoint has been saved, a generation change means the room was deleted and recreated: stop before delivering from the new conversation. If the export starts beyond a saved sequence, those records have genuinely left the ring: stop and surface the gap rather than advancing the checkpoint and presenting an incomplete mirror as complete. Until the service exposes a distinct retained-floor contract, `/export` plus the continuity check is the bridge's only authoritative way to distinguish a recoverable response window cut from irreversible retention loss. The export costs one ordinary read and is needed on cold start and after a detected response-window gap.
 
 For a saved checkpoint, validate every sequence in the selected read or export before
 delivering any of it, including records whose bridge DID will later suppress an echo.
 An internal hole, duplicate or out-of-order record stops the bridge without advancing the
 checkpoint. This is an unexplained discontinuity, not proof of retention loss; the loop
 does not try an additional export for an internal hole. Cold start still adopts the
-available retained history without establishing its completeness. Exact continuation
-begins once that first checkpoint has been saved, even if its sequence is zero.
+available retained history without establishing its completeness. Exact continuation begins once that first checkpoint has been saved, even if its sequence is zero.
+
+For older servers, an absent JSON `generation` field or `X-Room-Generation` export header is interpreted as generation 0. This avoids a missing-field crash during rolling upgrades, but cannot detect room replacement while both responses omit generation. Once a nonzero generation has been saved, a missing poll field normalizes to 0 and stops as a mismatch rather than silently weakening the checkpoint.
 
 An empty response can report a higher room head after messages expire. That polling
 high-water mark does not establish delivery: after a saved checkpoint, stop without

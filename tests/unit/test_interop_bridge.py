@@ -109,7 +109,7 @@ CHECKPOINT = {"generation": 1, "last_delivered_seq": 3}
         # Export may legitimately include records appended after the triggering poll.
         (CHECKPOINT, _view(6, 7), (_export(4, 5, 6, 7, 8),), [4, 5, 6, 7, 8], 8),
         (CHECKPOINT, _view(last_seq=3), (), [], 3),
-        (None, _view(last_seq=0), (), [], 0),
+        (None, _view(last_seq=0), (_export(),), [], 0),
     ],
     ids=["ordinary", "retained-prefix", "cold-start", "export-ahead", "caught-up", "empty-start"],
 )

@@ -1,7 +1,7 @@
 """Empty-page supplement using sirpold's unchanged #545 bridge test harness."""
 
 import pytest
-from test_interop_bridge import Bridge, EndOfPollsError, _view
+from test_interop_bridge import Bridge, EndOfPollsError, _export, _view
 from test_interop_bridge import bridge_script as bridge_script
 
 
@@ -22,7 +22,7 @@ def test_saved_checkpoint_refuses_empty_advancement_before_delivery(bridge_scrip
 
 @pytest.mark.parametrize("first_head", [0, 6])
 def test_empty_cold_start_checkpoint_requires_continuity_on_next_poll(bridge_script, first_head):
-    bridge = Bridge(None, [_view(last_seq=first_head), _view(last_seq=first_head + 2)])
+    bridge = Bridge(None, [_view(last_seq=first_head), _view(last_seq=first_head + 2)], [_export()])
 
     with pytest.raises(RuntimeError, match=f"continuity unavailable after bridge seq {first_head}"):
         bridge.run(bridge_script)
@@ -31,11 +31,11 @@ def test_empty_cold_start_checkpoint_requires_continuity_on_next_poll(bridge_scr
     assert bridge.checkpoint == bridge.saved[0]
     assert bridge.delivered == []
     assert bridge.cursors == [0, first_head]
-    assert bridge.export_calls == 0
+    assert bridge.export_calls == 1
 
 
 def test_cold_start_adopts_empty_head_then_delivers_its_successor(bridge_script):
-    bridge = Bridge(None, [_view(last_seq=6), _view(7)])
+    bridge = Bridge(None, [_view(last_seq=6), _view(7)], [_export()])
 
     with pytest.raises(EndOfPollsError):
         bridge.run(bridge_script)
@@ -46,7 +46,7 @@ def test_cold_start_adopts_empty_head_then_delivers_its_successor(bridge_script)
         {"generation": 1, "last_delivered_seq": 7},
     ]
     assert bridge.checkpoint == bridge.saved[-1]
-    assert bridge.export_calls == 0
+    assert bridge.export_calls == 1
 
 
 @pytest.mark.parametrize(("saved_seq", "head"), [(0, 0), (3, 3), (9, 6)])

@@ -463,11 +463,11 @@ def test_the_reference_bridge_recovers_a_retained_cursor_gap_before_advancing(cl
     bridge = client.get("/interop.md").text.split("## ActivityPub", 1)[0]
     assert 'generation = None if cold_start else checkpoint["generation"]' in bridge
     assert 'checkpoint["last_delivered_seq"]' in bridge
-    assert 'view["generation"] != generation' in bridge
+    assert "observed_generation != generation" in bridge
     assert "was recreated" in bridge
     assert 'view["first_seq"] > since + 1' in bridge
     assert 'get(f"{BASE}/r/{room}/export")' in bridge
-    assert 'exported.headers["X-Room-Generation"]' in bridge
+    assert 'exported.headers.get("X-Room-Generation", 0)' in bridge
     assert 'not cold_start and (not messages or messages[0]["seq"] != since + 1)' in bridge
     assert "raise RuntimeError" in bridge
     assert (
